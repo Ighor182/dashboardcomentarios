@@ -1,16 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { supabase } from "../lib/supabase";
 
 // ============================================================
-// SERVIÇO DE IA — MÁQUINA DE INSIGHTS LINHA UNI (PADRÃO 2026)
+// SERVIÇO DE IA — MÁQUINA DE INSIGHTS LINHA UNI (EDGE MODE)
 // ============================================================
 
-const MODEL_NAMES = ["gemini-2.5-flash", "gemini-3.1-pro", "gemini-2.0-pro"];
-const CHUNK_SIZE = 60; 
-const API_DELAY = 600; 
-
-const NOVO_COMENTARIO_MARKERS = [
-  "Novo comentário", "novo comentário", "NOVO COMENTÁRIO", "Novo Comentário", "IA Analisar", "", undefined, null
-];
+const CHUNK_SIZE = 50; 
+const API_DELAY = 300; 
 
 export interface ClassifiedComment {
   id: number;
@@ -33,38 +28,9 @@ export interface ClassifiedComment {
   id_sistema: string;
 }
 
-const CLASSIFICATION_SYSTEM_PROMPT = `Você é um Analista Sênior Metroviário. 
-REGRA ABSOLUTA: Responda APENAS com um array JSON. Proibido introduções, saudações ou explicações.
-Se você falar qualquer palavra fora do JSON, o sistema quebrará.
-
-Dedução de Tipo: Se não houver código, use o nome (Guia=GUI, Procedimento=PRO).
-Versão: V1, V1.0, V01 -> V1.
-Empresa: "Sobrenome, Nome" -> TDV. "Nome Sobrenome" -> CLU.
-Data: Se futura (após abril/2026), inverta dia/mês.
-
-Taxonomia:
-- Classificação: ["Informação insuficiente", "Não classificável", "Processo / Conceito", "Ortografia / Tradução", "Pendência TDV"]
-- Categoria: ["Sistema", "Atualizar Design", "Informação"]
-- Subcategoria: ["CLU", "TDV", "EPC"]
-- Processo vinculado: ["Ação - TDV", "Ação - CLU", "Siemens", "Kanguini", "Revenga", "SICA", "TKE", "Zitron", "Hitachi", "Civil", "Convergint", "Processo", "Alstom"]
-- Criticidade: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"]`;
-
-const INSIGHTS_SYSTEM_PROMPT = `Gere uma análise técnica e curta (8 linhas) sobre os dados da Linha Uni.`;
-
-// ============================================================
-// AUXILIARES
-// ============================================================
-
-function extractJsonArray(text: string): any[] {
-  try {
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error("Nenhum array JSON encontrado na resposta.");
-    return JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.error("[Gemini] Erro ao extrair JSON:", e);
-    return [];
-  }
-}
+const NOVO_COMENTARIO_MARKERS = [
+  "Novo comentário", "novo comentário", "NOVO COMENTÁRIO", "IA Analisar", "", undefined, null
+];
 
 function needsClassification(row: Record<string, any>): boolean {
   const fields = ["Nível", "Classificação (antiga)", "Categoria", "Subcategoria", "Tipo de necessidade para responder o comentário"];
@@ -76,53 +42,25 @@ function needsClassification(row: Record<string, any>): boolean {
 
 function checkFutureDate(dateVal: any): string {
   if (!dateVal) return "";
-  
-  // Se já for um objeto Date, formatar como string PT-BR
-  if (dateVal instanceof Date) {
-    return dateVal.toLocaleDateString('pt-BR');
-  }
-
+  if (dateVal instanceof Date) return dateVal.toLocaleDateString('pt-BR');
   const dateStr = String(dateVal);
   try {
     const parts = dateStr.includes("/") ? dateStr.split("/") : dateStr.split("-");
     if (parts.length < 3) return dateStr;
-    
     const day = parseInt(parts[0]);
     const month = parseInt(parts[1]);
     const year = parseInt(parts[2]);
-
-    // Lógica para 2026: inverter se parecer MM/DD
-    if (year === 2026 && month > 4 && day <= 12) { 
-      return `${parts[1]}/${parts[0]}/${parts[2]}`;
-    }
+    if (year === 2026 && month > 4 && day <= 12) return `${parts[1]}/${parts[0]}/${parts[2]}`;
   } catch (e) {}
   return dateStr;
-}
-
-async function callGeminiWithFallback(apiKey: string, promptMessages: any[]) {
-  const genAI = new GoogleGenerativeAI(apiKey);
-  let lastError = null;
-
-  for (const modelName of MODEL_NAMES) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent({ contents: promptMessages });
-      return result.response.text();
-    } catch (err: any) {
-      lastError = err;
-      continue;
-    }
-  }
-  throw lastError || new Error("Falha total IA");
 }
 
 export async function classifyComments(
   rawData: Record<string, any>[],
   onProgress?: (c: number, t: number) => void
 ): Promise<ClassifiedComment[]> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) throw new Error("API Key não configurada.");
-
+  
+  // 1. Preparar resultados baseados na planilha
   const results: ClassifiedComment[] = rawData.map((row, i) => {
     const author = row["Autor"] || "";
     return {
@@ -147,12 +85,14 @@ export async function classifyComments(
     };
   });
 
+  // 2. Identificar quais linhas precisam de IA
   const toClassifyIndices = rawData.map((row, i) => ({ row, i }))
     .filter(x => needsClassification(x.row))
     .map(x => x.i);
 
   if (toClassifyIndices.length === 0) return results;
 
+  // 3. Processar em lotes via Supabase Edge Function
   const chunks = [];
   for (let i = 0; i < toClassifyIndices.length; i += CHUNK_SIZE) {
     chunks.push(toClassifyIndices.slice(i, i + CHUNK_SIZE));
@@ -160,7 +100,7 @@ export async function classifyComments(
 
   for (let i = 0; i < chunks.length; i++) {
     const chunkIndices = chunks[i];
-    const commentsData = chunkIndices.map(idx => ({
+    const commentsChunk = chunkIndices.map(idx => ({
       index: idx,
       cod: results[idx].procedimento_codigo,
       nome: results[idx].procedimento_nome,
@@ -168,31 +108,33 @@ export async function classifyComments(
     }));
 
     try {
-      const messages = [
-        { role: "user", parts: [{ text: CLASSIFICATION_SYSTEM_PROMPT }] },
-        { role: "model", parts: [{ text: "[]" }] }, // Força a IA a pensar em formato de array
-        { role: "user", parts: [{ text: `DATASET:\n${JSON.stringify(commentsData)}` }] }
-      ];
-
-      const response = await callGeminiWithFallback(apiKey, messages);
-      const parsed = extractJsonArray(response);
-
-      parsed.forEach((cls: any) => {
-        const item = results[cls.index];
-        if (item) {
-          item.classificacao = cls.classificacao || item.classificacao;
-          item.categoria = cls.categoria || item.categoria;
-          item.subcategoria = cls.subcategoria || item.subcategoria;
-          item.processo_vinculado = cls.processo_vinculado || item.processo_vinculado;
-          item.criticidade = cls.criticidade || item.criticidade;
-          if (cls.empresa_deduzida) item.empresa_autor = cls.empresa_deduzida;
-          if (cls.tipo_deduzido) item.tipo = cls.tipo_deduzido;
-          if (cls.versao_normalizada) item.versao = cls.versao_normalizada;
-        }
+      // CHAMANDO A EDGE FUNCTION NA NUVEM
+      const { data, error } = await supabase.functions.invoke('analyze-comments', {
+        body: { comments: commentsChunk }
       });
-      console.log(`[Gemini] Lote ${i + 1} de ${chunks.length} processado OK.`);
+
+      if (error) throw error;
+
+      // Aplicar classificações ao array principal
+      if (Array.isArray(data)) {
+        data.forEach((cls: any) => {
+          const item = results[cls.index];
+          if (item) {
+            item.classificacao = cls.classificacao || item.classificacao;
+            item.categoria = cls.categoria || item.categoria;
+            item.subcategoria = cls.subcategoria || item.subcategoria;
+            item.processo_vinculado = cls.processo_vinculado || item.processo_vinculado;
+            item.criticidade = cls.criticidade || item.criticidade;
+            if (cls.empresa_deduzida) item.empresa_autor = cls.empresa_deduzida;
+            if (cls.tipo_deduzido) item.tipo = cls.tipo_deduzido;
+            if (cls.versao_normalizada) item.versao = cls.versao_normalizada;
+          }
+        });
+      }
+      
+      console.log(`[Edge Function] Lote ${i + 1} de ${chunks.length} OK.`);
     } catch (e) {
-      console.error(`[Gemini] Erro no lote ${i + 1}`, e);
+      console.error(`[Edge Function] Erro no lote ${i + 1}:`, e);
     }
 
     onProgress?.(i + 1, chunks.length);
@@ -203,17 +145,21 @@ export async function classifyComments(
 }
 
 export async function generateInsights(data: ClassifiedComment[]): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) return "";
   try {
-    const stats = { total: data.length, alta: data.filter(d => d.criticidade.includes("1")).length };
-    const messages = [
-      { role: "user", parts: [{ text: INSIGHTS_SYSTEM_PROMPT }] },
-      { role: "model", parts: [{ text: "Ok." }] },
-      { role: "user", parts: [{ text: `Dados: ${JSON.stringify(stats)}` }] }
-    ];
-    return await callGeminiWithFallback(apiKey, messages);
+    const stats = { 
+        total: data.length, 
+        alta: data.filter(d => d.criticidade.includes("1")).length 
+    };
+    
+    const { data: insights, error } = await supabase.functions.invoke('analyze-comments', {
+        body: { 
+            comments: [{ msg: "GERAR INSIGHTS GERAIS DO DASHBOARD", stats }] 
+        }
+    });
+
+    if (error) throw error;
+    return typeof insights === 'string' ? insights : "Insights gerados com sucesso.";
   } catch {
-    return "Insights temporariamente indisponíveis.";
+    return "Insights temporariamente indisponíveis (Processamento via Edge Function).";
   }
 }
