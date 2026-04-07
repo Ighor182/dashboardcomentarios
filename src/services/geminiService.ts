@@ -126,15 +126,16 @@ export async function classifyComments(
           const item = results[idx];
           if (item) {
             item.classificacao = cls.classificacao || item.classificacao;
+            // ... (campos restantes)
             item.categoria = cls.categoria || item.categoria;
             item.subcategoria = cls.subcategoria || item.subcategoria;
             item.processo_vinculado = cls.processo_vinculado || item.processo_vinculado;
             item.criticidade = cls.criticidade || item.criticidade;
-            if (cls.empresa_deduzida) item.empresa_autor = cls.empresa_deduzida;
-            if (cls.tipo_deduzido) item.tipo = cls.tipo_deduzido;
-            if (cls.versao_normalizada) item.versao = cls.versao_normalizada;
           }
         });
+      } else if (data && (data as any).error) {
+        console.error(`[IA] FALHA NO LOTE ${i + 1}:`, (data as any).error);
+        console.warn(`[IA] TEXTO BRUTO RESPOSTA:`, (data as any).raw);
       }
       
       console.log(`[Edge Function] Lote ${i + 1} de ${chunks.length} OK.`);

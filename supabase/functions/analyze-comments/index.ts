@@ -57,14 +57,27 @@ serve(async (req) => {
     const data = await response.json()
     const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    // Se for insights, retorna o texto puro. Se for classify, limpa o JSON.
-    let finalResponse = textResponse;
-    if (mode === 'classify') {
-      const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
-      finalResponse = jsonMatch ? jsonMatch[0] : "[]"
+    if (mode === 'insights') {
+      return new Response(textResponse, {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
+      })
     }
 
-    return new Response(finalResponse, {
+    // Tenta extrair o JSON
+    const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
+    if (!jsonMatch) {
+      console.error("Falha ao extrair JSON. Texto bruto:", textResponse);
+      return new Response(JSON.stringify({ 
+        error: "Falha na estrutura JSON da IA", 
+        raw: textResponse 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200, // Mantemos 200 para ver o erro no data do front
+      })
+    }
+
+    return new Response(jsonMatch[0], {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
