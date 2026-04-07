@@ -4,8 +4,8 @@ import { supabase } from "../lib/supabase";
 // SERVIÇO DE IA — MÁQUINA DE INSIGHTS LINHA UNI (EDGE MODE)
 // ============================================================
 
-const CHUNK_SIZE = 50; 
-const API_DELAY = 300; 
+const CHUNK_SIZE = 20; 
+const API_DELAY = 1000; 
 
 export interface ClassifiedComment {
   id: number;

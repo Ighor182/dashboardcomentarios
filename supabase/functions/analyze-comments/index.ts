@@ -5,21 +5,30 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const CLASSIFY_PROMPT = `Você é um Analista Sênior Metroviário da Linha Uni.
-REGRA ABSOLUTA: Responda APENAS com um array JSON válido. Proibido introduções ou explicações.
-Cada objeto no array DEVE conter o campo "index" (o mesmo enviado na entrada) e os campos de análise abaixo.
+const CLASSIFY_PROMPT = `Você é o Especialista Chefe de Operações da Linha Uni (Linha 6 - Laranja do Metrô de SP).
+Sua missão é analisar comentários técnicos feitos por revisores sobre os Procedimentos Operacionais (POs) do sistema.
 
-Estrutura do JSON Esperada:
-[
-  {
-    "index": number,
-    "classificacao": string, (Taxonomia: ["Informação insuficiente", "Não classificável", "Processo / Conceito", "Ortografia / Tradução", "Pendência TDV"])
-    "categoria": string, (Taxonomia: ["Sistema", "Atualizar Design", "Informação"])
-    "subcategoria": string, (Taxonomia: ["CLU", "TDV", "EPC"])
-    "processo_vinculado": string, (Taxonomia: ["Ação - TDV", "Ação - CLU", "Siemens", "Kanguini", "Revenga", "SICA", "TKE", "Zitron", "Hitachi", "Civil", "Convergint", "Processo", "Alstom"])
-    "criticidade": string (Taxonomia: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"])
-  }
-]`;
+### CONTEXTO DE NEGÓCIO:
+- Os POs descrevem como operar trens, estações e sistemas de sinalização.
+- Erros de segurança ou lógica operacional são CRÍTICOS.
+- Dúvidas de tradução ou termos técnicos são "Processo / Conceito".
+- Erros de digitação são "Ortografia / Tradução".
+
+### REGRAS DE ANÁLISE:
+1. **Classificação**: 
+   - 'Processo / Conceito': Se o comentário questiona a lógica da operação.
+   - 'Ortografia / Tradução': Se for erro de português ou termo mal traduzido.
+   - 'Pendência TDV': Se faltar informação técnica que só o fornecedor (TDV) tem.
+2. **Processo Vinculado**: Tente identificar qual sistema está envolvido (Alstom para sinalização, Siemens para comunicação, Civil para infra, etc). Se for genérico, use 'Processo'.
+3. **Criticidade**: 
+   - '1 - Alto': Riscos operacionais, segurança ou erros de lógica grave.
+   - '3 - Baixo': Erros de formatação ou gramática.
+
+### REGRA DE SAÍDA:
+Responda APENAS com um array JSON. Mantenha o campo "index" original.
+Exemplo: [{"index": 0, "classificacao": "Processo / Conceito", "categoria": "Informação", "subcategoria": "CLU", "processo_vinculado": "Alstom", "criticidade": "1 - Alto"}]
+
+DADOS PARA ANALISAR:`;
 
 const INSIGHTS_PROMPT = `Você é um Consultor de Estratégia Metroviária da Linha Uni.
 Gere um relatório técnico curto (máximo 8 linhas) sobre os dados fornecidos. 
@@ -42,7 +51,16 @@ serve(async (req) => {
         { role: "model", parts: [{ text: "Ok, envie os dados." }] },
         { role: "user", parts: [{ text: `DADOS:\n${JSON.stringify(comments)}` }] }
       ],
-      generationConfig: { temperature: 0.1 }
+      generationConfig: { 
+        temperature: 0.1,
+        maxOutputTokens: 2048,
+      },
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+      ]
     }
 
     const response = await fetch(
@@ -55,14 +73,20 @@ serve(async (req) => {
     )
 
     const data = await response.json()
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-    if (mode === 'insights') {
-      return new Response(textResponse, {
+    
+    // Se não houver candidatos, a IA bloqueou ou deu erro
+    if (!data.candidates || data.candidates.length === 0) {
+      console.error("Gemini Error/Block:", data);
+      return new Response(JSON.stringify({ 
+        error: "IA bloqueou o conteúdo ou erro de API", 
+        raw: JSON.stringify(data) 
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
       })
     }
+
+    const textResponse = data.candidates[0].content?.parts?.[0]?.text || ""
 
     // Tenta extrair o JSON
     const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
