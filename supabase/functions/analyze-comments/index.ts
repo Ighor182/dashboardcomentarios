@@ -48,12 +48,13 @@ serve(async (req) => {
     const payload = {
       contents: [
         { role: "user", parts: [{ text: prompt }] },
-        { role: "model", parts: [{ text: "Ok, envie os dados." }] },
+        { role: "model", parts: [{ text: "Ok, enviarei os dados em formato JSON estrito." }] },
         { role: "user", parts: [{ text: `DADOS:\n${JSON.stringify(comments)}` }] }
       ],
       generationConfig: { 
         temperature: 0.1,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 8192,
+        response_mime_type: "application/json",
       },
       safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -86,22 +87,32 @@ serve(async (req) => {
       })
     }
 
-    const textResponse = data.candidates[0].content?.parts?.[0]?.text || ""
+    let textResponse = data.candidates[0].content?.parts?.[0]?.text || ""
+    
+    // 1. Limpeza agressiva de Markdown e blocos de código
+    textResponse = textResponse
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
 
-    // Tenta extrair o JSON
-    const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) {
-      console.error("Falha ao extrair JSON. Texto bruto:", textResponse);
+    // 2. Tenta extrair o que está entre o primeiro [ e o último ]
+    const startIdx = textResponse.indexOf("[");
+    const endIdx = textResponse.lastIndexOf("]");
+    
+    if (startIdx === -1 || endIdx === -1) {
+      console.error("JSON incompleto ou ausente:", textResponse);
       return new Response(JSON.stringify({ 
-        error: "Falha na estrutura JSON da IA", 
+        error: "Resposta da IA não contém um array JSON válido", 
         raw: textResponse 
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200, // Mantemos 200 para ver o erro no data do front
+        status: 200,
       })
     }
 
-    return new Response(jsonMatch[0], {
+    const jsonString = textResponse.substring(startIdx, endIdx + 1);
+
+    return new Response(jsonString, {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
