@@ -7,12 +7,19 @@ const corsHeaders = {
 
 const CLASSIFY_PROMPT = `Você é um Analista Sênior Metroviário da Linha Uni.
 REGRA ABSOLUTA: Responda APENAS com um array JSON válido. Proibido introduções ou explicações.
-Taxonomia:
-- Classificação: ["Informação insuficiente", "Não classificável", "Processo / Conceito", "Ortografia / Tradução", "Pendência TDV"]
-- Categoria: ["Sistema", "Atualizar Design", "Informação"]
-- Subcategoria: ["CLU", "TDV", "EPC"]
-- Processo vinculado: ["Ação - TDV", "Ação - CLU", "Siemens", "Kanguini", "Revenga", "SICA", "TKE", "Zitron", "Hitachi", "Civil", "Convergint", "Processo", "Alstom"]
-- Criticidade: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"]`;
+Cada objeto no array DEVE conter o campo "index" (o mesmo enviado na entrada) e os campos de análise abaixo.
+
+Estrutura do JSON Esperada:
+[
+  {
+    "index": number,
+    "classificacao": string, (Taxonomia: ["Informação insuficiente", "Não classificável", "Processo / Conceito", "Ortografia / Tradução", "Pendência TDV"])
+    "categoria": string, (Taxonomia: ["Sistema", "Atualizar Design", "Informação"])
+    "subcategoria": string, (Taxonomia: ["CLU", "TDV", "EPC"])
+    "processo_vinculado": string, (Taxonomia: ["Ação - TDV", "Ação - CLU", "Siemens", "Kanguini", "Revenga", "SICA", "TKE", "Zitron", "Hitachi", "Civil", "Convergint", "Processo", "Alstom"])
+    "criticidade": string (Taxonomia: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"])
+  }
+]`;
 
 const INSIGHTS_PROMPT = `Você é um Consultor de Estratégia Metroviária da Linha Uni.
 Gere um relatório técnico curto (máximo 8 linhas) sobre os dados fornecidos. 

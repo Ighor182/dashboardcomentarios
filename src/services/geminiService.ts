@@ -120,8 +120,10 @@ export async function classifyComments(
 
       // Aplicar classificações ao array principal
       if (Array.isArray(data)) {
+        console.log(`[IA] Lote ${i + 1} dados recebidos:`, data.length, "itens");
         data.forEach((cls: any) => {
-          const item = results[cls.index];
+          const idx = Number(cls.index);
+          const item = results[idx];
           if (item) {
             item.classificacao = cls.classificacao || item.classificacao;
             item.categoria = cls.categoria || item.categoria;
