@@ -108,9 +108,12 @@ export async function classifyComments(
     }));
 
     try {
-      // CHAMANDO A EDGE FUNCTION NA NUVEM
+      // CHAMANDO A EDGE FUNCTION NA NUVEM (MODO CLASSIFY)
       const { data, error } = await supabase.functions.invoke('analyze-comments', {
-        body: { comments: commentsChunk }
+        body: { 
+          comments: commentsChunk,
+          mode: 'classify' 
+        }
       });
 
       if (error) throw error;
@@ -151,9 +154,11 @@ export async function generateInsights(data: ClassifiedComment[]): Promise<strin
         alta: data.filter(d => d.criticidade.includes("1")).length 
     };
     
+    // CHAMANDO A EDGE FUNCTION NA NUVEM (MODO INSIGHTS)
     const { data: insights, error } = await supabase.functions.invoke('analyze-comments', {
         body: { 
-            comments: [{ msg: "GERAR INSIGHTS GERAIS DO DASHBOARD", stats }] 
+            comments: [{ msg: "GERAR INSIGHTS GERAIS DO DASHBOARD", stats }],
+            mode: 'insights'
         }
     });
 

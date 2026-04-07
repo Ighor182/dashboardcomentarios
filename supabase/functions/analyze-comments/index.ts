@@ -5,45 +5,37 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const SYSTEM_PROMPT = `Você é um Analista Sênior Metroviário da Linha Uni.
+const CLASSIFY_PROMPT = `Você é um Analista Sênior Metroviário da Linha Uni.
 REGRA ABSOLUTA: Responda APENAS com um array JSON válido. Proibido introduções ou explicações.
 Taxonomia:
 - Classificação: ["Informação insuficiente", "Não classificável", "Processo / Conceito", "Ortografia / Tradução", "Pendência TDV"]
 - Categoria: ["Sistema", "Atualizar Design", "Informação"]
 - Subcategoria: ["CLU", "TDV", "EPC"]
 - Processo vinculado: ["Ação - TDV", "Ação - CLU", "Siemens", "Kanguini", "Revenga", "SICA", "TKE", "Zitron", "Hitachi", "Civil", "Convergint", "Processo", "Alstom"]
-- Criticidade: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"]
+- Criticidade: ["1 - Alto", "2 - Médio", "3 - Baixo", "4 - Interno TDV"]`;
 
-Instruções Adicionais:
-- Dedução de Tipo: Se não houver código, use o nome (Guia=GUI, Procedimento=PRO).
-- Versão: Normalizar para V1, V2, etc.
-- Empresa: Deduzir pelo formato do nome do autor.`;
+const INSIGHTS_PROMPT = `Você é um Consultor de Estratégia Metroviária da Linha Uni.
+Gere um relatório técnico curto (máximo 8 linhas) sobre os dados fornecidos. 
+Foque em tendências de segurança e criticidade.`;
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { comments } = await req.json()
+    const { comments, mode = 'classify' } = await req.json()
     const apiKey = Deno.env.get('GEMINI_API_KEY')
 
-    if (!apiKey) {
-      throw new Error('Chave GEMINI_API_KEY não configurada no Supabase Secrets.')
-    }
+    if (!apiKey) throw new Error('API Key não configurada.')
+
+    const prompt = mode === 'insights' ? INSIGHTS_PROMPT : CLASSIFY_PROMPT;
 
     const payload = {
       contents: [
-        { role: "user", parts: [{ text: SYSTEM_PROMPT }] },
-        { role: "model", parts: [{ text: "Compreendido. Envie os dados." }] },
-        { role: "user", parts: [{ text: `DATASET:\n${JSON.stringify(comments)}` }] }
+        { role: "user", parts: [{ text: prompt }] },
+        { role: "model", parts: [{ text: "Ok, envie os dados." }] },
+        { role: "user", parts: [{ text: `DADOS:\n${JSON.stringify(comments)}` }] }
       ],
-      generationConfig: {
-        temperature: 0.1,
-        topP: 0.8,
-        topK: 40
-      }
+      generationConfig: { temperature: 0.1 }
     }
 
     const response = await fetch(
@@ -56,13 +48,16 @@ serve(async (req) => {
     )
 
     const data = await response.json()
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]"
-    
-    // Limpeza de JSON (Regex)
-    const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
-    const cleanJson = jsonMatch ? jsonMatch[0] : "[]"
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    return new Response(cleanJson, {
+    // Se for insights, retorna o texto puro. Se for classify, limpa o JSON.
+    let finalResponse = textResponse;
+    if (mode === 'classify') {
+      const jsonMatch = textResponse.match(/\[[\s\S]*\]/)
+      finalResponse = jsonMatch ? jsonMatch[0] : "[]"
+    }
+
+    return new Response(finalResponse, {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
