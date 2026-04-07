@@ -330,7 +330,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, onLogout, onBack }) => {
                   cy="50%"
                   outerRadius={window.innerWidth < 768 ? 70 : 100}
                   dataKey="value"
-                  label={window.innerWidth > 768 ? ({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%` : false}
+                  label={window.innerWidth > 768 ? (props: any) => `${props.name} ${(props.percent * 100).toFixed(0)}%` : false}
                   labelLine={{ stroke: '#fff' }}
                 >
                   {processoVinculadoData.map((_entry, index) => (
